@@ -253,14 +253,14 @@ class LazyVariable(object):
             diag_lazy_var = DiagLazyVariable(diag.expand(self.size(0)))
             return AddedDiagLazyVariable(self, diag_lazy_var)
 
-    def add_jitter(self):
+    def add_jitter(self, jitter_val=1e-3):
         """
         Adds jitter (i.e., a small diagonal component) to the matrix this
         LazyVariable represents. This could potentially be implemented as a no-op,
         however this could lead to numerical instabilities, so this should only
         be done at the user's risk.
         """
-        diag = Variable(self.tensor_cls(1).fill_(1e-3))
+        diag = self.tensor_cls(1).fill_(jitter_val)
         return self.add_diag(diag)
 
     def cpu(self):
@@ -346,6 +346,9 @@ class LazyVariable(object):
             return self._batch_get_indices(batch_iter, row_col_iter, row_col_iter).view(size[0], size[1])
         else:
             return self._get_indices(row_col_iter, row_col_iter)
+
+    def dim(self):
+        return self.ndimension()
 
     def evaluate(self):
         """
@@ -641,19 +644,29 @@ class LazyVariable(object):
 
         Returns:
             :obj:`gpytorch.lazy.LazyVariable`: Another lazy variable representing the result of the multiplication. if
-            other was a constant, this will likely be a :obj:`gpytorch.lazy.ConstantMulLazyVariable`. If other was
+            other was a constant (or batch of constants), this will likely be a
+            :obj:`gpytorch.lazy.ConstantMulLazyVariable`. If other was
             another matrix, this will likely be a :obj:`gpytorch.lazy.MulLazyVariable`.
         """
         if not (isinstance(other, Variable) or isinstance(other, LazyVariable)) or (
-            torch.is_tensor(other) and (other.numel() == 1 or (other.numel() == self.size(0)))
+            torch.is_tensor(other) and (other.numel() == 1 or (self.dim() == 3 and other.numel() == self.size(0)))
         ):
             from .constant_mul_lazy_variable import ConstantMulLazyVariable
 
             return ConstantMulLazyVariable(self, other)
-        else:
+
+        elif other.size() == self.size():
             from .mul_lazy_variable import MulLazyVariable
 
             return MulLazyVariable(self, other)
+
+        else:
+            raise RuntimeError(
+                '"other" must be a constant (or batch of constants), or the same size as self.\n'
+                "Expected: size of [1] or [%d] or %s.\n"
+                "Got: size of %s"
+                % (self.size(0) if self.ndimension() == 3 else 1, repr(self.size()), repr(other.size()))
+            )
 
     def mul_batch(self, mul_batch_size=None):
         """
