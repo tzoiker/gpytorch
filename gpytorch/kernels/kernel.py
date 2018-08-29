@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 from abc import abstractmethod
 import torch
 from torch.nn import ModuleList
-from gpytorch.lazy import LazyEvaluatedKernelVariable, ZeroLazyVariable
+from gpytorch.lazy import LazyVariable, LazyEvaluatedKernelVariable, ZeroLazyVariable
 from gpytorch.module import Module
 from gpytorch.priors._compatibility import _bounds_to_prior
 from gpytorch.utils import prod
@@ -21,11 +21,11 @@ class Kernel(Module):
     In the typical use case, to extend this class means to implement the :func:`~gpytorch.kernels.Kernel.forward`
     method.
 
-    ..note::
-        The `:func:`~gpytorch.kernels.Kernel.__call__` does some additional internal work. In particular,
+    .. note::
+        The :func:`~gpytorch.kernels.Kernel.__call__` does some additional internal work. In particular,
         all kernels are lazily evaluated so that, in some cases, we can index in to the kernel matrix before actually
         computing it. Furthermore, many built in kernel modules return LazyVariables that allow for more efficient
-        inference than if we explicitly computed the kernel matrixself.
+        inference than if we explicitly computed the kernel matrix itselfself.
 
         As a result, if you want to use a :obj:`gpytorch.kernels.Kernel` object just to get an actual
         :obj:`torch.tensor` representing the covariance matrix, you may need to call the
@@ -65,6 +65,7 @@ class Kernel(Module):
             active_dims = torch.tensor(active_dims, dtype=torch.long)
         self.active_dims = active_dims
         self.ard_num_dims = ard_num_dims
+        self.has_lengthscale = has_lengthscale
         if has_lengthscale:
             lengthscale_num_dims = 1 if ard_num_dims is None else ard_num_dims
             log_lengthscale_prior = _bounds_to_prior(prior=log_lengthscale_prior, bounds=log_lengthscale_bounds)
@@ -94,7 +95,11 @@ class Kernel(Module):
 
     @abstractmethod
     def forward_diag(self, x1, x2, **params):
-        return super(Kernel, self).__call__(x1.transpose(-2, -3), x2.transpose(-2, -3), **params)
+        res = super(Kernel, self).__call__(x1.transpose(-2, -3), x2.transpose(-2, -3), **params)
+        if isinstance(res, LazyVariable):
+            res = res.evaluate()
+        res = res.transpose(-2, -3)
+        return res
 
     @abstractmethod
     def forward(self, x1, x2, **params):
