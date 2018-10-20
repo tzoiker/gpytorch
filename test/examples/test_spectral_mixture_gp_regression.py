@@ -15,7 +15,7 @@ from gpytorch.kernels import SpectralMixtureKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.means import ConstantMean
 from gpytorch.priors import SmoothedBoxPrior
-from gpytorch.random_variables import GaussianRandomVariable
+from gpytorch.distributions import MultivariateNormal
 from collections import OrderedDict
 
 # Simple training data: let's try to learn a sine function
@@ -29,11 +29,17 @@ test_y = torch.sin(test_x * (2 * pi))
 
 good_state_dict = OrderedDict(
     [
-        ("likelihood.log_noise", torch.tensor([-13.4054])),
+        ("likelihood.log_noise", torch.tensor([[-5.]])),
         ("mean_module.constant", torch.tensor([[0.4615]])),
-        ("covar_module.log_mixture_weights", torch.tensor([-0.7277, -15.1212, -0.5511, -6.3787])),
-        ("covar_module.log_mixture_means", torch.tensor([[-0.1201], [0.6013], [-3.7319], [0.2380]])),
-        ("covar_module.log_mixture_scales", torch.tensor([[-1.9713], [2.6217], [-3.9268], [-4.7071]])),
+        ("covar_module.log_mixture_weights", torch.tensor([-0.7277, -15.1212, -0.5511, -6.3787]).unsqueeze(0)),
+        (
+            "covar_module.log_mixture_means",
+            torch.tensor([[-0.1201], [0.6013], [-3.7319], [0.2380]]).unsqueeze(0).unsqueeze(-2),
+        ),
+        (
+            "covar_module.log_mixture_scales",
+            torch.tensor([[-1.9713], [2.6217], [-3.9268], [-4.7071]]).unsqueeze(0).unsqueeze(-2),
+        ),
     ]
 )
 
@@ -42,23 +48,24 @@ class SpectralMixtureGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
         super(SpectralMixtureGPModel, self).__init__(train_x, train_y, likelihood)
         self.mean_module = ConstantMean(prior=SmoothedBoxPrior(-1, 1))
-        self.covar_module = SpectralMixtureKernel(n_mixtures=4)
+        self.covar_module = SpectralMixtureKernel(num_mixtures=4, ard_num_dims=1)
         self.covar_module.initialize_from_data(train_x, train_y)
 
     def forward(self, x):
         mean_x = self.mean_module(x)
         covar_x = self.covar_module(x)
-        return GaussianRandomVariable(mean_x, covar_x)
+        return MultivariateNormal(mean_x, covar_x)
 
 
 class TestSpectralMixtureGPRegression(unittest.TestCase):
     def setUp(self):
         if os.getenv("UNLOCK_SEED") is None or os.getenv("UNLOCK_SEED").lower() == "false":
+            seed = 4
             self.rng_state = torch.get_rng_state()
-            torch.manual_seed(4)
+            torch.manual_seed(seed)
             if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(4)
-            random.seed(4)
+                torch.cuda.manual_seed_all(seed)
+            random.seed(seed)
 
     def tearDown(self):
         if hasattr(self, "rng_state"):
@@ -97,9 +104,10 @@ class TestSpectralMixtureGPRegression(unittest.TestCase):
             gp_model.load_state_dict(good_state_dict, strict=False)
 
             # Test the model
+        with torch.no_grad(), gpytorch.settings.max_cg_iterations(100):
             gp_model.eval()
             likelihood.eval()
-            test_preds = likelihood(gp_model(test_x)).mean()
+            test_preds = likelihood(gp_model(test_x)).mean
             mean_abs_error = torch.mean(torch.abs(test_y - test_preds))
 
         # The spectral mixture kernel should be trivially able to

@@ -21,6 +21,12 @@ Kernel
 Standard Kernels
 -----------------------------
 
+:hidden:`CosineKernel`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: CosineKernel
+   :members:
+
 :hidden:`LinearKernel`
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -127,5 +133,5 @@ Kernels for Scalable GP Regression Methods
 :hidden:`MultiplicativeGridInterpolationKernel`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: AdditiveGridInterpolationKernel
+.. autoclass:: MultiplicativeGridInterpolationKernel
    :members:

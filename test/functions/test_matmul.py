@@ -5,73 +5,93 @@ from __future__ import unicode_literals
 
 import torch
 import unittest
-from torch.autograd import Variable
-from gpytorch.lazy import NonLazyVariable
-from gpytorch.utils import approx_equal
+from gpytorch.lazy import NonLazyTensor
+from test._utils import approx_equal
 
 
 class TestMatmulNonBatch(unittest.TestCase):
     def setUp(self):
-        mat = torch.Tensor([[3, -1, 0], [-1, 3, 0], [0, 0, 3]])
+        mat = torch.tensor([[3, -1, 0], [-1, 3, 0], [0, 0, 3]], dtype=torch.float)
         vec = torch.randn(3)
         vecs = torch.randn(3, 4)
-
-        self.mat_var = Variable(mat, requires_grad=True)
-        self.mat_var_clone = Variable(mat, requires_grad=True)
-        self.vec_var = Variable(vec, requires_grad=True)
-        self.vec_var_clone = Variable(vec, requires_grad=True)
-        self.vecs_var = Variable(vecs, requires_grad=True)
-        self.vecs_var_clone = Variable(vecs, requires_grad=True)
+        self.mat = mat.detach().clone().requires_grad_(True)
+        self.mat_copy = mat.detach().clone().requires_grad_(True)
+        self.vec = vec.detach().clone().requires_grad_(True)
+        self.vec_copy = vec.detach().clone().requires_grad_(True)
+        self.vecs = vecs.detach().clone().requires_grad_(True)
+        self.vecs_copy = vecs.detach().clone().requires_grad_(True)
 
     def test_matmul_vec(self):
         # Forward
-        res = NonLazyVariable(self.mat_var).matmul(self.vec_var)
-        actual = self.mat_var_clone.matmul(self.vec_var_clone)
+        res = NonLazyTensor(self.mat).matmul(self.vec)
+        actual = self.mat_copy.matmul(self.vec_copy)
         self.assertTrue(approx_equal(res, actual))
 
         # Backward
-        grad_output = torch.Tensor(3).normal_()
+        grad_output = torch.randn(3)
         res.backward(gradient=grad_output)
         actual.backward(gradient=grad_output)
-        self.assertTrue(approx_equal(self.mat_var_clone.grad.data, self.mat_var.grad.data))
-        self.assertTrue(approx_equal(self.vec_var_clone.grad.data, self.vec_var.grad.data))
+        self.assertTrue(approx_equal(self.mat_copy.grad, self.mat.grad))
+        self.assertTrue(approx_equal(self.vec_copy.grad, self.vec.grad))
 
     def test_matmul_multiple_vecs(self):
         # Forward
-        res = NonLazyVariable(self.mat_var).matmul(self.vecs_var)
-        actual = self.mat_var_clone.matmul(self.vecs_var_clone)
+        res = NonLazyTensor(self.mat).matmul(self.vecs)
+        actual = self.mat_copy.matmul(self.vecs_copy)
         self.assertTrue(approx_equal(res, actual))
 
         # Backward
-        grad_output = torch.Tensor(3, 4).normal_()
+        grad_output = torch.randn(3, 4)
         res.backward(gradient=grad_output)
         actual.backward(gradient=grad_output)
-        self.assertTrue(approx_equal(self.mat_var_clone.grad.data, self.mat_var.grad.data))
-        self.assertTrue(approx_equal(self.vecs_var_clone.grad.data, self.vecs_var.grad.data))
+        self.assertTrue(approx_equal(self.mat_copy.grad, self.mat.grad))
+        self.assertTrue(approx_equal(self.vecs_copy.grad, self.vecs.grad))
 
 
 class TestMatmulBatch(unittest.TestCase):
     def setUp(self):
-        mats = torch.Tensor([[[3, -1, 0], [-1, 3, 0], [0, 0, 3]], [[10, -2, 1], [-2, 10, 0], [1, 0, 10]]])
+        mats = torch.randn(2, 5, 3)
         vecs = torch.randn(2, 3, 4)
-
-        self.mats_var = Variable(mats, requires_grad=True)
-        self.mats_var_clone = Variable(mats, requires_grad=True)
-        self.vecs_var = Variable(vecs, requires_grad=True)
-        self.vecs_var_clone = Variable(vecs, requires_grad=True)
+        self.mats = mats.detach().clone().requires_grad_(True)
+        self.mats_copy = mats.detach().clone().requires_grad_(True)
+        self.vecs = vecs.detach().clone().requires_grad_(True)
+        self.vecs_copy = vecs.detach().clone().requires_grad_(True)
 
     def test_matmul_multiple_vecs(self):
         # Forward
-        res = NonLazyVariable(self.mats_var).matmul(self.vecs_var)
-        actual = self.mats_var_clone.matmul(self.vecs_var_clone)
+        res = NonLazyTensor(self.mats).matmul(self.vecs)
+        actual = self.mats_copy.matmul(self.vecs_copy)
         self.assertTrue(approx_equal(res, actual))
 
         # Backward
-        grad_output = torch.Tensor(2, 3, 4).normal_()
+        grad_output = torch.randn(2, 5, 4)
         res.backward(gradient=grad_output)
         actual.backward(gradient=grad_output)
-        self.assertTrue(approx_equal(self.mats_var_clone.grad.data, self.mats_var.grad.data))
-        self.assertTrue(approx_equal(self.vecs_var_clone.grad.data, self.vecs_var.grad.data))
+        self.assertTrue(approx_equal(self.mats_copy.grad, self.mats.grad))
+        self.assertTrue(approx_equal(self.vecs_copy.grad, self.vecs.grad))
+
+
+class TestMatmulMultiBatch(unittest.TestCase):
+    def setUp(self):
+        mats = torch.randn(3, 4, 5, 6)
+        vecs = torch.randn(3, 4, 6, 2)
+        self.mats = mats.detach().clone().requires_grad_(True)
+        self.mats_copy = mats.detach().clone().requires_grad_(True)
+        self.vecs = vecs.detach().clone().requires_grad_(True)
+        self.vecs_copy = vecs.detach().clone().requires_grad_(True)
+
+    def test_matmul_multiple_vecs(self):
+        # Forward
+        res = NonLazyTensor(self.mats).matmul(self.vecs)
+        actual = self.mats_copy.matmul(self.vecs_copy)
+        self.assertTrue(approx_equal(res, actual))
+
+        # Backward
+        grad_output = torch.randn(3, 4, 5, 2)
+        res.backward(gradient=grad_output)
+        actual.backward(gradient=grad_output)
+        self.assertTrue(approx_equal(self.mats_copy.grad, self.mats.grad))
+        self.assertTrue(approx_equal(self.vecs_copy.grad, self.vecs.grad))
 
 
 if __name__ == "__main__":

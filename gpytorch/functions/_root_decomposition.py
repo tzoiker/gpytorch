@@ -4,23 +4,33 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-from torch.autograd import Function, Variable
+from torch.autograd import Function
 from ..utils.lanczos import lanczos_tridiag, lanczos_tridiag_to_diag
 from .. import settings
 
 
 class RootDecomposition(Function):
     def __init__(
-        self, representation_tree, cls, size, max_iter, batch_size=None, root=True, inverse=False, initial_vector=None
+        self,
+        representation_tree,
+        max_iter,
+        dtype,
+        device,
+        matrix_shape,
+        batch_shape,
+        root=True,
+        inverse=False,
+        initial_vectors=None,
     ):
         self.representation_tree = representation_tree
-        self.cls = cls
-        self.size = size
+        self.device = device
+        self.dtype = dtype
+        self.matrix_shape = matrix_shape
         self.max_iter = max_iter
-        self.batch_size = batch_size
+        self.batch_shape = batch_shape
         self.root = root
         self.inverse = inverse
-        self.initial_vector = initial_vector.data if isinstance(initial_vector, Variable) else initial_vector
+        self.initial_vectors = initial_vectors
 
     def forward(self, *matrix_args):
         """
@@ -31,18 +41,19 @@ class RootDecomposition(Function):
         - (Tensor) R_inv, such that R_inv R_inv^T \approx A^{-1} (will only be populated if self.inverse = True)
         """
         # Get closure for matmul
-        lazy_var = self.representation_tree(*matrix_args)
-        matmul_closure = lazy_var._matmul
+        lazy_tsr = self.representation_tree(*matrix_args)
+        matmul_closure = lazy_tsr._matmul
         # Do lanczos
         q_mat, t_mat = lanczos_tridiag(
             matmul_closure,
             self.max_iter,
-            tensor_cls=self.cls,
-            batch_size=self.batch_size,
-            n_dims=self.size,
-            init_vecs=self.initial_vector,
+            dtype=self.dtype,
+            device=self.device,
+            matrix_shape=self.matrix_shape,
+            batch_shape=self.batch_shape,
+            init_vecs=self.initial_vectors,
         )
-        if self.batch_size is None:
+        if self.batch_shape is None:
             q_mat = q_mat.unsqueeze(-3)
             t_mat = t_mat.unsqueeze(-3)
         if t_mat.ndimension() == 3:  # If we only used one probe vector
@@ -57,17 +68,17 @@ class RootDecomposition(Function):
         root_evals = eigenvalues.sqrt()
         # Store q_mat * t_mat_chol
         # Decide if we're computing the inverse, or the regular root
-        root = q_mat.new()
-        inverse = q_mat.new()
+        root = torch.empty(0, dtype=q_mat.dtype, device=q_mat.device)
+        inverse = torch.empty(0, dtype=q_mat.dtype, device=q_mat.device)
         if self.inverse:
             inverse = q_mat / root_evals.unsqueeze(-2)
         if self.root:
             root = q_mat * root_evals.unsqueeze(-2)
 
         if not settings.memory_efficient.on():
-            self._lazy_var = lazy_var
+            self._lazy_tsr = lazy_tsr
 
-        if self.batch_size is None:
+        if self.batch_shape is None:
             root = root.squeeze(1) if root.numel() else root
             q_mat = q_mat.squeeze(1)
             t_mat = t_mat.squeeze(1)
@@ -120,16 +131,16 @@ class RootDecomposition(Function):
                     is_batch = True
 
             # Get closure for matmul
-            if hasattr(self, "_lazy_var"):
-                lazy_var = self._lazy_var
+            if hasattr(self, "_lazy_tsr"):
+                lazy_tsr = self._lazy_tsr
             else:
-                lazy_var = self.representation_tree(*matrix_args)
+                lazy_tsr = self.representation_tree(*matrix_args)
 
             # Get root inverse
             if not self.inverse:
                 inverse = q_mat / root_evals.unsqueeze(-2)
             # Left factor:
-            left_factor = inverse.new(inverse.size()).zero_()
+            left_factor = torch.zeros_like(inverse)
             if root_grad_output is not None:
                 left_factor.add_(root_grad_output)
             if inverse_grad_output is not None:
@@ -148,10 +159,8 @@ class RootDecomposition(Function):
             else:
                 left_factor = left_factor.contiguous()
                 right_factor = right_factor.contiguous()
-            res = lazy_var._quad_form_derivative(left_factor, right_factor)
+            res = lazy_tsr._quad_form_derivative(left_factor, right_factor)
 
-            if not is_batch:
-                res = [item.squeeze(0) for item in res]
             return tuple(res)
         else:
             pass

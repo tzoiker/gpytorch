@@ -1,15 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 from collections import OrderedDict
 
 import torch
 from torch import nn
+from torch.distributions import Distribution
 
-from .lazy import LazyVariable
-from .random_variables import RandomVariable
+from .lazy import LazyTensor
 from .variational import VariationalStrategy
 
 
@@ -33,6 +30,10 @@ class Module(nn.Module):
     def forward(self, *inputs, **kwargs):
         raise NotImplementedError
 
+    def hyperparameters(self):
+        for name, param in self.named_hyperparameters():
+            yield param
+
     def initialize(self, **kwargs):
         """
         Set a value for a parameter
@@ -54,9 +55,13 @@ class Module(nn.Module):
             prior = self._priors.get(name)
             if prior is not None:
                 param = self._parameters[name]
-                if not prior.is_in_support(param):
+                try:
+                    prior._validate_sample(param)
+                except ValueError as e:
                     raise ValueError(
-                        "Value of parameter {param} not contained in support of specified prior".format(param=param)
+                        "Value of parameter {p} not valid for specified prior. Original exception:\n{e}".format(
+                            p=param, e=e
+                        )
                     )
         return self
 
@@ -80,6 +85,16 @@ class Module(nn.Module):
 
         """
         return _extract_named_derived_priors(module=self, memo=None, prefix="")
+
+    def named_hyperparameters(self):
+        for name, param in self.named_parameters():
+            if "variational_" not in name:
+                yield name, param
+
+    def named_variational_parameters(self):
+        for name, param in self.named_parameters():
+            if "variational_" in name:
+                yield name, param
 
     def named_variational_strategies(self):
         """Returns an iterator over module variational strategies, yielding both
@@ -147,6 +162,10 @@ class Module(nn.Module):
             self._priors[name] = prior
         return self
 
+    def variational_parameters(self):
+        for name, param in self.named_variational_parameters():
+            yield param
+
     def variational_strategies(self):
         for _, strategy in self.named_variational_strategies():
             yield strategy
@@ -160,17 +179,26 @@ class Module(nn.Module):
 
     def __call__(self, *inputs, **kwargs):
         outputs = self.forward(*inputs, **kwargs)
-        if torch.is_tensor(outputs) or isinstance(outputs, RandomVariable) or isinstance(outputs, LazyVariable):
-            return outputs
-        for output in outputs:
-            if not (isinstance(output, RandomVariable) or torch.is_tensor(output) or isinstance(output, LazyVariable)):
+
+        if isinstance(outputs, tuple):
+            if not all(
+                torch.is_tensor(output) or isinstance(output, Distribution) or isinstance(output, LazyTensor)
+                for output in outputs
+            ):
                 raise RuntimeError(
-                    "Output must be a RandomVariable, torch.Tensor, or LazyVariable. "
-                    "Was a {}".format(input.__class__.__name__)
+                    "All outputs must be a Distribution, torch.Tensor, or LazyTensor. "
+                    "Got {}".format([output.__class__.__name__ for output in outputs])
                 )
-        if len(outputs) == 1:
-            outputs = outputs[0]
-        return outputs
+            if len(outputs) == 1:
+                outputs = outputs[0]
+            return outputs
+
+        elif torch.is_tensor(outputs) or isinstance(outputs, Distribution) or isinstance(outputs, LazyTensor):
+            return outputs
+        else:
+            raise RuntimeError(
+                "Output must be a Distribution, torch.Tensor, or LazyTensor. Got {}".format(outputs.__class__.__name__)
+            )
 
 
 def _extract_named_parameter_priors(module, memo=None, prefix=""):

@@ -18,14 +18,27 @@ class Matmul(Module):
 class _Matmul(Function):
 
 	@staticmethod
-	def forward(ctx, representation_tree, lazy_var, rhs, *matrix_args):
-		res = lazy_var._matmul(rhs)
-		to_save = [rhs] + list(matrix_args)
+	def forward(ctx, representation_tree, lazy_tsr, rhs, *matrix_args):
+		orig_rhs = rhs
+
+		if rhs.ndimension() == 1:
+			is_vector = True
+			rhs = rhs.unsqueeze(-1)
+		else:
+			is_vector = False
+
+		res = lazy_tsr._matmul(rhs)
+		to_save = [orig_rhs] + list(matrix_args)
 		ctx.save_for_backward(*to_save)
 		ctx._representation_tree = representation_tree
 		if not settings.memory_efficient.on():
-			ctx._lazy_var = lazy_var
+			ctx._lazy_tsr = lazy_tsr
+
+		# Squeeze if necessary
+		if is_vector:
+			res = res.squeeze(-1)
 		return res
+
 
 	@staticmethod
 	def backward(ctx, grad_output):
@@ -44,11 +57,12 @@ class _Matmul(Function):
 
 		# input_2 gradient
 		if ctx.needs_input_grad[0]:
-			if hasattr(ctx, "_lazy_var"):
-				lazy_var = ctx._lazy_var
+			if hasattr(ctx, "_lazy_tsr"):
+				lazy_tsr = ctx._lazy_tsr
 			else:
-				lazy_var = ctx.representation_tree(*matrix_args)
-			rhs_grad = lazy_var._t_matmul(grad_output)
+				lazy_tsr = ctx.representation_tree(*matrix_args)
+			rhs_grad = lazy_tsr._t_matmul(grad_output)
 			rhs_grad = rhs_grad.view(rhs_shape)
 
-		return tuple([None, None] + [rhs_grad] + list(arg_grads))
+		return tuple([rhs_grad] + list(arg_grads))
+		# return tuple([None, None] + [rhs_grad] + list(arg_grads))

@@ -4,9 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-import warnings
-
-
 class _feature_flag(object):
     _state = False
 
@@ -86,23 +83,6 @@ class max_root_decomposition_size(_value_context):
     _global_value = 100
 
 
-class max_lanczos_iterations(max_root_decomposition_size):
-    """
-    The maximum number of Lanczos iterations to perform
-    This is used when 1) computing variance estiamtes 2) when drawing from
-    MVNs, or 3) for kernel multiplication More values results in higher accuracy
-    Default: 100
-
-    DEPRECATED: Use max_root_decomposition_size instead
-    """
-
-    def __enter__(self,):
-        warnings.warn(
-            "max_lanczos_iterations is deprecated. " "Use max_root_decomposition_size instead.", DeprecationWarning
-        )
-        return super(max_lanczos_iterations, self).__enter__()
-
-
 class max_preconditioner_size(_value_context):
     """
     The maximum size of preconditioner to use. 0 corresponds to turning
@@ -152,6 +132,14 @@ class num_trace_samples(_value_context):
     """
 
     _global_value = 10
+
+
+class terminate_cg_by_size(_feature_flag):
+    """
+    If set to true, cg will terminate after n iterations for an n x n matrix.
+    """
+
+    _state = True
 
 
 class use_toeplitz(_feature_flag):
